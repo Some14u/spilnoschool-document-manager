@@ -31,12 +31,11 @@ body {
     border-radius: 8px;
     overflow: hidden;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    height: 600px;
 }
 
 .widget-iframe {
     width: 100%;
-    height: 100%;
+    height: 400px;
     border: none;
 }
 
@@ -140,4 +139,96 @@ body {
     white-space: pre-wrap;
     max-height: 200px;
     overflow-y: auto;
+}
+
+/* Modal styles */
+.modal {
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-content {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    width: 90%;
+    max-width: 500px;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.modal-header {
+    padding: 20px 20px 10px 20px;
+    border-bottom: 1px solid #e9ecef;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: #333;
+    font-size: 18px;
+}
+
+.close {
+    color: #aaa;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.close:hover,
+.close:focus {
+    color: #000;
+    text-decoration: none;
+}
+
+.modal-body {
+    padding: 20px;
+}
+
+.modal-body form {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.modal-body label {
+    font-weight: bold;
+    color: #333;
+    margin-bottom: 5px;
+}
+
+.modal-body input[type="url"],
+.modal-body input[type="text"] {
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.modal-body input[type="url"]:focus,
+.modal-body input[type="text"]:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.modal-footer {
+    padding: 10px 20px 20px 20px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
 }

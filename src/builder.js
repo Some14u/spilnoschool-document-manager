@@ -37,7 +37,28 @@ function buildWidget() {
   console.log('🔨 Starting widget build...');
 
   global.data = {
-    host: 'localhost:3000' // Default host, can be overridden
+    host: 'localhost:3000', // Default host, can be overridden
+    __request: {
+      query_params: {
+        documents: encodeURIComponent(JSON.stringify([
+          {
+            url: 'https://example.com/sample.pdf',
+            fileName: 'sample.pdf',
+            type: 'application/pdf'
+          },
+          {
+            url: 'https://example.com/document.docx',
+            fileName: 'document.docx',
+            type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          }
+        ])),
+        config: encodeURIComponent(JSON.stringify({
+          allowUpload: true,
+          maxFileSize: 10485760, // 10MB
+          allowedTypes: ['pdf', 'doc', 'docx', 'txt', 'jpg', 'png']
+        }))
+      }
+    }
   };
 
   const componentsDir = path.join(__dirname, 'widget');
@@ -65,6 +86,17 @@ function buildWidget() {
       require(path.join(componentsDir, 'javascript.js'));
     } catch (error) {
       generateErrorPage('JavaScript', error, distDir);
+      buildSuccess = false;
+    }
+  }
+
+  if (buildSuccess) {
+    try {
+      console.log('🔧 Processing iframe-resizer-javascript component...');
+      delete require.cache[path.join(componentsDir, 'iframe-resizer-javascript.js')];
+      require(path.join(componentsDir, 'iframe-resizer-javascript.js'));
+    } catch (error) {
+      generateErrorPage('iframe-resizer-javascript', error, distDir);
       buildSuccess = false;
     }
   }

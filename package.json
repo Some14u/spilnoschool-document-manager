@@ -1,7 +1,7 @@
 {
-  "name": "spilnoschool-document-viewer",
+  "name": "spilnoschool-document-manager",
   "version": "1.0.0",
-  "description": "SpilnoSchool Document Viewer - Widget for viewing documents, images, and videos in iframe",
+  "description": "SpilnoSchool Document Manager - Widget for managing documents with upload, drag-and-drop, and file operations",
   "main": "server.js",
   "scripts": {
     "build": "node src/builder.js",
@@ -13,7 +13,7 @@
     "express": "^4.18.2"
   },
   "devDependencies": {},
-  "keywords": ["widget", "document-viewer", "build-system"],
+  "keywords": ["widget", "document-manager", "file-upload", "drag-and-drop", "build-system"],
   "author": "",
   "license": "MIT"
 }
