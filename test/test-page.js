@@ -42,108 +42,40 @@ function sendToWidget(type, payload) {
 function addSampleDocuments() {
     const basePath = 'https://raw.githubusercontent.com/Some14u/spilnoschool-document-viewer/main/public/assets/';
     currentDocuments = [
-
         {
             url: basePath + "sample.svg",
+            fileName: "sample.svg",
             description: "Локальный SVG файл",
             format: "image/svg+xml"
         },
         {
             url: "/assets/sample.pdf",
+            fileName: "sample.pdf", 
             description: "Локальный PDF документ",
             format: "application/pdf"
         },
         {
-            url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-            description: "YouTube видео",
-            format: "video/youtube"
-        },
-        {
-            url: "https://google.com",
-            description: "Google главная страница",
-            format: "text/html",
-            showAsLink: true
-        },
-        {
-            url: "https://docs.google.com/document/d/e/2PACX-1vTLDLUxQae6nKmdHCbR4PWNvLb8mnJOQZ_gnuco-CPzLpFtARoF9901J9rWh4N4-w2biUedgCbhZsbX/pub",
-            description: "Google Документ",
-            format: "application/google-docs"
-        },
-        {
-            url: "https://docs.google.com/spreadsheets/d/e/2PACX-1vSGZeSdZTI1sP8QwUuLvQBKlPbyxoWTV_W3MRRiMOZmxqKfpoFXMXfSGGdxFzPz5snGNJNWfCAfC2b-/pubhtml",
-            description: "Google Таблица",
-            format: "application/google-sheets"
-        },
-        {
-            url: "https://docs.google.com/presentation/d/e/2PACX-1vTfAt9GkyVgjBZm16VQ6W-34yyTOWlpjE82jdgix_CRMvpTGOvvaCQ_xDe8uwvpIq6KzEph8lEeCwiq/pubembed?start=false&loop=false&delayms=3000",
-            description: "Google Презентация",
-            format: "application/google-slides"
-        },
-        {
             url: basePath + "sample1.docx",
+            fileName: "sample1.docx",
             description: "Word документ (DOCX)",
             format: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         },
         {
-            url: basePath + "sample2.doc",
-            description: "Word документ (DOC)",
-            format: "application/msword"
-        },
-        {
             url: basePath + "sample2.xlsx",
+            fileName: "sample2.xlsx",
             description: "Excel таблица (XLSX)",
             format: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         },
         {
-            url: basePath + "file_example_XLS_100.xls",
-            description: "Excel таблица (XLS)",
-            format: "application/vnd.ms-excel"
-        },
-        {
-            url: basePath + "test.odt",
-            description: "OpenDocument текст",
-            format: "application/vnd.oasis.opendocument.text"
-        },
-        {
             url: basePath + "React-utf8.txt",
+            fileName: "React-utf8.txt",
             description: "Текстовый файл (UTF-8)",
             format: "text/plain"
-        },
-        {
-            url: basePath + "React-866.txt",
-            description: "Текстовый файл (CP866)",
-            format: "text/plain"
-        },
-        {
-            url: basePath + "React-1251.txt",
-            description: "Текстовый файл (CP1251)",
-            format: "text/plain"
-        },
-        {
-            url: basePath + "React-utf16BE.txt",
-            description: "Текстовый файл (UTF-16BE)",
-            format: "text/plain"
-        },
-        {
-            url: basePath + "React-utf16LE.txt",
-            description: "Текстовый файл (UTF-16LE)",
-            format: "text/plain"
-        },
-        {
-            url: basePath + "clipsave.net-.mp4",
-            description: "Видео файл (MP4)",
-            format: "video/mp4"
-        },
-        {
-            url: basePath + "file_example_MP3_700KB.mp3",
-            description: "Аудио файл (MP3)",
-            format: "audio/mpeg"
         }
     ];
 
-    sendToWidget('updateDocuments', {
-        documents: currentDocuments,
-        index: 0
+    sendToWidget('changeDocuments', {
+        documents: currentDocuments
     });
 
     updateDocumentList();
@@ -154,24 +86,26 @@ function addImageDocuments() {
     currentDocuments = [
         {
             url: "https://picsum.photos/800/600?random=1",
+            fileName: "random-image-1.jpg",
             description: "Случайное изображение 1",
             format: "image/jpeg"
         },
         {
             url: "https://picsum.photos/800/600?random=2",
+            fileName: "random-image-2.jpg",
             description: "Случайное изображение 2",
             format: "image/jpeg"
         },
         {
             url: "https://picsum.photos/800/600?random=3",
+            fileName: "random-image-3.jpg",
             description: "Случайное изображение 3",
             format: "image/jpeg"
         }
     ];
 
-    sendToWidget('updateDocuments', {
-        documents: currentDocuments,
-        index: 0
+    sendToWidget('changeDocuments', {
+        documents: currentDocuments
     });
 
     updateDocumentList();
@@ -179,43 +113,118 @@ function addImageDocuments() {
 }
 
 function addVideoDocuments() {
+    const basePath = 'https://raw.githubusercontent.com/Some14u/spilnoschool-document-viewer/main/public/assets/';
     currentDocuments = [
         {
-            url: "https://www.youtube.com/watch?v=jNQXAC9IVRw",
-            description: "YouTube: Me at the zoo",
-            format: "video/youtube"
+            url: basePath + "clipsave.net-.mp4",
+            fileName: "sample-video.mp4",
+            description: "Видео файл (MP4)",
+            format: "video/mp4"
         },
         {
-            url: "https://www.youtube.com/watch?v=9bZkp7q19f0",
-            description: "YouTube: Gangnam Style",
-            format: "video/youtube"
+            url: basePath + "file_example_MP3_700KB.mp3",
+            fileName: "sample-audio.mp3",
+            description: "Аудио файл (MP3)",
+            format: "audio/mpeg"
         }
     ];
 
-    sendToWidget('updateDocuments', {
-        documents: currentDocuments,
-        index: 0
+    sendToWidget('changeDocuments', {
+        documents: currentDocuments
     });
 
     updateDocumentList();
-    showStatus(`Добавлено ${currentDocuments.length} видео`);
+    showStatus(`Добавлено ${currentDocuments.length} медиа файлов`);
 }
 
 function clearDocuments() {
     currentDocuments = [];
 
-    sendToWidget('updateDocuments', {
-        documents: [],
-        index: 0
+    sendToWidget('changeDocuments', {
+        documents: []
     });
 
     updateDocumentList();
     showStatus('Все документы удалены', 'error');
 }
 
+function logMessage(message, data = null) {
+    console.log(`[Test Page] ${message}`, data || '');
+    showStatus(message);
+}
+
 window.addEventListener('message', function(event) {
     if (event.data === 'reload-widget') {
         reloadWidget();
+        return;
+    }
+
+    const iframe = document.getElementById('widgetFrame');
+    
+    if (event.data && event.data.type) {
+        switch (event.data.type) {
+            case 'resize':
+                if (event.data.payload && event.data.payload.height) {
+                    iframe.style.height = event.data.payload.height + 'px';
+                    logMessage('Размер iframe изменен по высоте:', event.data.payload.height + 'px');
+                }
+                break;
+
+            case 'uploadFileRequest':
+                logMessage('Запрос загрузки файла:', event.data.payload);
+                setTimeout(() => {
+                    iframe.contentWindow.postMessage({
+                        type: 'fileUploaded',
+                        payload: {
+                            requestId: event.data.payload.requestId,
+                            fileData: {
+                                data: {
+                                    title: event.data.payload.file.name,
+                                    type: event.data.payload.file.type || 'application/octet-stream',
+                                    fileName: 'c930f8c7-c066-49bc-832c-f698ad08ffa5/2025/6/29/uploaded_' + Date.now(),
+                                    size: event.data.payload.file.size,
+                                    userId: 197861,
+                                    accId: "c930f8c7-c066-49bc-832c-f698ad08ffa5",
+                                    id: Math.floor(Math.random() * 1000000)
+                                }
+                            }
+                        }
+                    }, '*');
+                }, 1000);
+                break;
+
+            case 'documentsChanged':
+                logMessage('Документы изменены:', event.data.payload);
+                if (event.data.payload && event.data.payload.documents) {
+                    currentDocuments = event.data.payload.documents;
+                    updateDocumentList();
+                }
+                break;
+
+            case 'editDocumentRequest':
+                logMessage('Запрос редактирования документа:', event.data.payload);
+                break;
+
+            case 'addWebResourceRequest':
+                logMessage('Запрос добавления веб-ресурса:', event.data.payload);
+                if (event.data.payload && event.data.payload.documents) {
+                    currentDocuments = event.data.payload.documents;
+                    updateDocumentList();
+                    console.log('Updated currentDocuments from widget payload:', currentDocuments.length, 'documents');
+                } else {
+                    console.log('No documents array found in payload');
+                }
+                showWebDocumentDialog();
+                break;
+
+            case 'addAudioRecordRequest':
+                logMessage('Запрос добавления аудиозаписи:', event.data.payload);
+                break;
+
+            default:
+                console.log('[Test Page] Неизвестное сообщение:', event.data);
+                break;
+        }
     }
 });
 
@@ -245,6 +254,86 @@ function reloadWidget() {
     showStatus('Виджет перезагружен');
 
     setTimeout(checkBuildStatus, 1000);
+}
+
+function showWebDocumentDialog() {
+    const modal = document.getElementById('webDocumentModal');
+    const urlInput = document.getElementById('documentUrl');
+    const descriptionInput = document.getElementById('documentDescription');
+    
+    urlInput.value = '';
+    descriptionInput.value = '';
+    
+    modal.style.display = 'flex';
+    
+    setTimeout(() => urlInput.focus(), 100);
+}
+
+function hideWebDocumentDialog() {
+    const modal = document.getElementById('webDocumentModal');
+    modal.style.display = 'none';
+}
+
+function submitWebDocument() {
+    const urlInput = document.getElementById('documentUrl');
+    const descriptionInput = document.getElementById('documentDescription');
+    
+    const url = urlInput.value.trim();
+    const description = descriptionInput.value.trim();
+    
+    if (!url) {
+        showStatus('Введите URL документа', 'error');
+        return;
+    }
+    
+    const newDocument = {
+        url: url,
+        description: description || url,
+        format: getFormatFromUrl(url)
+    };
+    
+    currentDocuments.push(newDocument);
+    
+    sendToWidget('changeDocuments', {
+        documents: currentDocuments
+    });
+    
+    updateDocumentList();
+    
+    hideWebDocumentDialog();
+    
+    showStatus(`Добавлен веб-документ: ${newDocument.description}`);
+}
+
+function extractFileNameFromUrl(url) {
+    try {
+        const urlObj = new URL(url);
+        const pathname = urlObj.pathname;
+        const fileName = pathname.split('/').pop();
+        return fileName || 'web-document';
+    } catch (e) {
+        return 'web-document';
+    }
+}
+
+function getFormatFromUrl(url) {
+    const extension = url.split('.').pop().toLowerCase();
+    const formatMap = {
+        'pdf': 'application/pdf',
+        'doc': 'application/msword',
+        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'xls': 'application/vnd.ms-excel',
+        'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'txt': 'text/plain',
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'png': 'image/png',
+        'gif': 'image/gif',
+        'svg': 'image/svg+xml',
+        'mp4': 'video/mp4',
+        'mp3': 'audio/mpeg'
+    };
+    return formatMap[extension] || 'text/html';
 }
 
 window.addEventListener('load', function() {

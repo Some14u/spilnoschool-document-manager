@@ -1,1253 +1,641 @@
-const host = data.host;
+const documents = data.__request.query_params?.documents ? JSON.parse(decodeURIComponent(data.__request.query_params.documents)) : [];
+const config = data.__request.query_params?.config ? JSON.parse(decodeURIComponent(data.__request.query_params.config)) : {};
 
 
 
 
-function setup() {
-  class DocumentViewer {
-    constructor() {
-      this.microsoftViewerUrl = "https://view.officeapps.live.com/op/embed.aspx";
-      this.documentsParam = this.getQueryParameter("documents");
-      this.indexParam = parseInt(this.getQueryParameter("index")) || 0;
-      // this.adobeClientId = "d5c9b76969ff481fb343aabb22d609b0"; // for localhost
-      this.adobeClientId = "7ef4db68cd074a8391182c8cdbac68bf"; // for apiGW
+function script(documents, config) {
+  class DocumentManager {
+    constructor(rootEl, documents, config) {
+      this.rootEl = rootEl;
+      this.cfg = Object.assign({
+        canDelete: true,
+        canReorder: true,
+        canEdit: true,
+        showDescription: true,
+        showDocumentIcon: true,
+        showMenuPerDocument: true,
+        canClick: true,
+        fileLimit: Infinity,
+        mimeTypes: [],
+        fileSizeLimit: Infinity,
+        showAddAudioRecordButton: true,
+        showAddWebResourceButton: true,
+        relayToComponentId: undefined,
+        localization: {
+          headerMessage: "Перетаскивайте документы в эту область, или {{выберите на носителе}}",
+          defaultDescriptionMask: "Документ №{{n}}",
+          fileLimitExceeded: "Нельзя добавить более {{limit}} документов.",
+          uploadError: "Ошибка при добавлении документа {{name}}.",
+        },
+      },
+        config
+      );
+      // Track upload requests by requestId
+      this.pendingRequests = new Set();
+      this.uploadResults = {};
 
-      // Parse documents array or single document
-      this.documents = [];
-      this.currentIndex = 0;
-      this.isGalleryMode = false;
+      this.renderSkeleton();
+      this.bindStaticEvents();
+      this.relayToComponentSnippet = this.cfg.relayToComponentId ? {
+        relayToComponentId: this.cfg.relayToComponentId
+      } : {};
+      if (this.cfg.canReorder) this.initSortable();
+      window.addEventListener("message", this.onHostMessage.bind(this));
 
-      if (this.documentsParam) {
-        try {
-          // Parse documents parameter as JSON array of objects
-          const documentsArray = JSON.parse(decodeURIComponent(this.documentsParam));
-          if (Array.isArray(documentsArray) && documentsArray.length > 0) {
-            this.documents = documentsArray;
-            this.isGalleryMode = documentsArray.length > 1;
-          }
-        } catch (e) {
-          console.error("Failed to parse documents parameter:", e);
-        }
-      }
-
-      // Ensure we have at least one document - show error if no documents provided
-      if (this.documents.length === 0) {
-        this.documents = [{
-          url: "",
-          name: "No Document Provided",
-          format: "",
-        },];
-      }
-
-      this.iframe = document.getElementById("viewer");
-      this.plainTextWrapper = document.getElementById("plainTextWrapper");
-      this.plainTextContainer = document.getElementById("plainTextContainer");
-      this.adobeViewer = document.getElementById("adobeViewer");
-      this.loader = document.getElementById("loader");
-      this.galleryNavPrev = document.getElementById("galleryNavPrev");
-      this.galleryNavNext = document.getElementById("galleryNavNext");
-      this.unsupportedFormat = document.getElementById("unsupportedFormat");
-      this.descriptionDisplay = document.getElementById("descriptionDisplay");
-      this.fullscreenBtn = document.getElementById("fullscreenBtn");
-
-      this.galleryNavPrevHandler = null;
-      this.galleryNavNextHandler = null;
-
-      this.hideNavTimeout = null;
-      this.hideFileNameTimeout = null;
-      this.currentViewer = null;
-
-      this.iframeCache = new Map(); // Key: documentUrl + format, Value: iframe element
-      this.MAX_CACHED_IFRAMES = 15; // Reasonable limit to prevent memory issues
-      this.currentCachedIframe = null;
-    }
-
-    hideOverlay() {
-      const overlay = document.getElementById("iframeMouseOverlay");
-      if (overlay) overlay.remove();
-    }
-
-    isFullscreenAllowed() {
-      // Check if fullscreen API is available
-      const fullscreenEnabled = document.fullscreenEnabled || document.webkitFullscreenEnabled || document.mozFullScreenEnabled || document.msFullscreenEnabled;
-
-      // For iframe context, we need to check if we can request fullscreen on the parent frame
-      if (window.frameElement) {
-        return fullscreenEnabled;
-      }
-
-      // For direct access (not in iframe), fullscreen should still work
-      return fullscreenEnabled;
-    }
-
-    shouldShowFullscreenButton() {
-      if (!this.isFullscreenAllowed()) return false;
-
-      // Don't show fullscreen button for video formats (they have their own)
-      const currentFormat = this.getCurrentFormat().toLowerCase();
-      if (currentFormat.startsWith("video/") || currentFormat === "video/youtube") {
-        return false;
-      }
-
-      return true;
-    }
-
-    updateFullscreenButtonPosition() {
-      // Static positioning - always 10px from top-right corner
-      document.documentElement.style.setProperty("--fullscreen-btn-right", "10px");
-    }
-
-    toggleFullscreen() {
-      const fullscreenEnabled = document.documentElement && (document.fullscreenEnabled || document.webkitFullscreenEnabled);
-
-      if (!fullscreenEnabled) {
-        console.log('Fullscreen is not allowed for this iframe');
-        return;
-      }
-
-      const isCurrentlyFullscreen = document.fullscreenElement || document.webkitFullscreenElement;
-
-      if (isCurrentlyFullscreen) {
-        const exitFullscreenFn = document.exitFullscreen || document.webkitExitFullscreen;
-        if (exitFullscreenFn) exitFullscreenFn.call(document);
-      } else {
-        const requestFullscreenFn = document.documentElement?.requestFullscreen || document.documentElement?.webkitRequestFullscreen;
-        requestFullscreenFn.call(document.documentElement);
+      if (documents && documents.length > 0) {
+        this.renderInitialDocuments(documents);
       }
     }
 
-    showOverlay() {
-      const rect = this.iframe.getBoundingClientRect();
-      if (rect.bottom < 0 || rect.top > window.innerHeight) return;
+    renderSkeleton() {
+      // Clear existing content
+      while (this.rootEl.firstChild) {
+        this.rootEl.removeChild(this.rootEl.firstChild);
+      }
+      const {
+        headerMessage
+      } = this.cfg.localization;
+      const [before, rest] = headerMessage.split("{{");
+      const [linkText, after] = rest.split("}}");
 
-      if (document.getElementById("iframeMouseOverlay")) return;
+      // File drop area
+      const dropArea = document.createElement("div");
+      dropArea.className = "file-drop-area";
+      this.fileDropArea = dropArea;
 
-      const container = this.iframe.parentElement;
-      if (getComputedStyle(container).position === "static") {
-        container.style.position = "relative";
+      // Instruction text with link
+      const instruction = document.createElement("div");
+      instruction.className = "file-drop-instruction";
+      instruction.appendChild(document.createTextNode(before));
+      const link = document.createElement("a");
+      link.id = "fileSelectLink";
+      link.href = "#";
+      link.textContent = linkText;
+      instruction.appendChild(link);
+      instruction.appendChild(document.createTextNode(after));
+      dropArea.appendChild(instruction);
+
+      // Extra buttons container
+      const extraButtons = document.createElement("div");
+      extraButtons.className = "extra-buttons";
+
+      if (this.cfg.showAddAudioRecordButton) {
+        const audioBtn = document.createElement("button");
+        audioBtn.id = "addAudioBtn";
+        audioBtn.className = "add-audio-button";
+        audioBtn.setAttribute("aria-label", "Add audio recording");
+        audioBtn.innerHTML = '<svg viewBox="0 0 200 200"><use xlink:href="#add-audio"/></svg>';
+        extraButtons.appendChild(audioBtn);
+        this.addAudioBtn = audioBtn;
       }
 
-      const overlay = document.createElement("div");
-      overlay.id = "iframeMouseOverlay";
-      overlay.className = "iframe-mouse-overlay";
-      container.appendChild(overlay);
+      // Add web resource button
+      if (this.cfg.showAddWebResourceButton) {
+        const webBtn = document.createElement("button");
+        webBtn.id = "addWebBtn";
+        webBtn.className = "add-web-button";
+        webBtn.setAttribute("aria-label", "Add web resource");
+        webBtn.innerHTML = '<svg viewBox="0 0 200 200"><use xlink:href="#add-link"/></svg>';
+        extraButtons.appendChild(webBtn);
+        this.addWebBtn = webBtn;
+      }
 
-      const pickTarget = (x, y) => {
-        overlay.style.pointerEvents = "none";
-        const el = document.elementFromPoint(x, y);
-        overlay.style.pointerEvents = "auto";
-        return el;
-      };
+      if (this.cfg.showAddWebResourceButton || this.cfg.showAddAudioRecordButton) {
+        dropArea.appendChild(extraButtons);
+      }
 
-      const forwardMouseEvent = (e, type) => {
-        const target = pickTarget(e.clientX, e.clientY);
-        if (!target) return;
-        const init = {
-          bubbles: true,
-          cancelable: true,
-          view: window,
-          clientX: e.clientX,
-          clientY: e.clientY,
-          screenX: e.screenX,
-          screenY: e.screenY,
-          ctrlKey: e.ctrlKey,
-          shiftKey: e.shiftKey,
-          altKey: e.altKey,
-          metaKey: e.metaKey,
-          button: e.button,
-          buttons: e.buttons,
-        };
-        target.dispatchEvent(new MouseEvent(type, init));
-      };
+      // Container for file items
+      const itemsContainer = document.createElement("div");
+      itemsContainer.className = "file-items";
+      itemsContainer.id = "fileItemsContainer";
+      dropArea.appendChild(itemsContainer);
+      this.fileItemsContainer = itemsContainer;
 
-      const forwardWheelEvent = (e) => {
-        const target = pickTarget(e.clientX, e.clientY);
-        if (!target) return;
-        const init = {
-          bubbles: true,
-          cancelable: true,
-          deltaX: e.deltaX,
-          deltaY: e.deltaY,
-          deltaZ: e.deltaZ,
-          deltaMode: e.deltaMode,
-        };
-        target.dispatchEvent(new WheelEvent("wheel", init));
-      };
+      this.rootEl.appendChild(dropArea);
 
-      const forwardTouchEvent = (e) => {
-        const t = e.changedTouches[0];
-        const target = pickTarget(t.clientX, t.clientY);
-        if (!target) return;
-        const touchEvent = new TouchEvent(e.type, {
-          bubbles: true,
-          cancelable: true,
-          touches: e.touches,
-          targetTouches: e.targetTouches,
-          changedTouches: e.changedTouches,
-          ctrlKey: e.ctrlKey,
-          shiftKey: e.shiftKey,
-          altKey: e.altKey,
-          metaKey: e.metaKey,
+      // Hidden file input
+      const input = document.createElement("input");
+      input.type = "file";
+      input.id = "fileInput";
+      input.multiple = true;
+      input.style.display = "none";
+      this.rootEl.appendChild(input);
+      this.fileInput = input;
+    }
+
+    renderInitialDocuments(documents) {
+      // Clear existing documents (should be empty on init, but for safety)
+      while (this.fileItemsContainer.firstChild) {
+        this.fileItemsContainer.removeChild(this.fileItemsContainer.firstChild);
+      }
+
+      documents.forEach((doc) => {
+        const el = this.createItemElement({
+          title: doc.fileName || doc.url,
+          format: doc.format,
+          fileName: doc.fileName,
+          url: doc.url,
+          description: doc.description,
+          ...(doc.canEdit !== undefined && { canEdit: doc.canEdit }),
+          ...(doc.canDelete !== undefined && { canDelete: doc.canDelete }),
+          ...(doc.canClick !== undefined && { canClick: doc.canClick }),
+          ...(doc.showDocumentIcon !== undefined && { showDocumentIcon: doc.showDocumentIcon }),
+          ...(doc.showDescription !== undefined && { showDescription: doc.showDescription })
         });
-        target.dispatchEvent(touchEvent);
-      };
-
-      const eventMap = {
-        mousemove: (e) => {
-          this.showNavButtons(e);
-          forwardMouseEvent(e, "mousemove");
-        },
-        touchstart: (e) => {
-          this.showNavButtons(e);
-          forwardTouchEvent(e);
-        },
-        click: (e) => {
-          this.showNavButtons(e);
-          forwardMouseEvent(e, "click");
-        },
-        mousedown: (e) => {
-          this.showNavButtons(e);
-          forwardMouseEvent(e, "mousedown");
-        },
-        mouseup: (e) => {
-          this.showNavButtons(e);
-          forwardMouseEvent(e, "mouseup");
-        },
-        dblclick: (e) => {
-          this.showNavButtons(e);
-          forwardMouseEvent(e, "dblclick");
-        },
-        contextmenu: (e) => {
-          this.showNavButtons(e);
-          forwardMouseEvent(e, "contextmenu");
-        },
-        wheel: (e) => {
-          this.showNavButtons(e);
-          forwardWheelEvent(e);
-        },
-        touchmove: (e) => {
-          this.showNavButtons(e);
-          forwardTouchEvent(e);
-        },
-        touchend: (e) => {
-          this.showNavButtons(e);
-          forwardTouchEvent(e);
-        },
-      };
-
-      Object.entries(eventMap).forEach(([type, handler]) => {
-        overlay.addEventListener(type, handler, {
-          passive: false
-        });
+        this.fileItemsContainer.appendChild(el);
       });
-    };
-
-    validateUrl(url) {
-      try {
-        // Allow relative paths (don't start with protocol)
-        if (!url.includes("://")) {
-          return true;
-        }
-
-        // For absolute URLs, validate protocol
-        const urlObj = new URL(url);
-        const allowedProtocols = ["http:", "https:", "file:", "data:"];
-        if (!urlObj.protocol || !allowedProtocols.includes(urlObj.protocol)) {
-          throw new Error("Недопустимый протокол");
-        }
-        return true;
-      } catch (e) {
-        console.error("Невалидный URL:", e);
-        return false;
-      }
+      this.recalcDocuments();
     }
 
-    initializeEventListeners() {
-      // Initialize fullscreen button and event listeners early so they work even with no initial documents
-      document.addEventListener("DOMContentLoaded", () => {
-        // Only setup fullscreen button if we have documents
-        if (this.documents.length > 0) {
-          this.setupFullscreenButton();
-          this.updateFullscreenButtonPosition();
-        }
-      });
-
-      // Update fullscreen button position on window resize
-      window.addEventListener("resize", () => this.updateFullscreenButtonPosition());
-    }
-
-    // Helper functions for empty state handling
-    hideAllViewers() {
-      // Use cleanupCurrentViewer to properly cleanup all viewers including ViewerJS
-      this.cleanupCurrentViewer();
-    }
-
-    hideNavButtons() {
-      if (this.galleryNavPrev) this.galleryNavPrev.classList.add("hidden");
-      if (this.galleryNavNext) this.galleryNavNext.classList.add("hidden");
-    }
-
-    hideFileName() {
-      const descriptionDisplay = document.getElementById("descriptionDisplay");
-      if (descriptionDisplay) descriptionDisplay.classList.add("hidden");
-    }
-
-    hideFullscreenButton() {
-      if (this.fullscreenBtn) this.fullscreenBtn.classList.add("hidden");
-    }
-
-    initializePostMessageListener() {
-      // PostMessage support for updating documents - initialize early so it works even with no initial documents
-      window.addEventListener("message", (event) => {
-        const value = event.data.id ? event.data.value : event.data;
-        const { type, payload } = value;
-        if (type === "updateDocuments") {
-          const newDocuments = payload.documents;
-          let newIndex = payload.index;
-
-          if (Array.isArray(newDocuments) && newDocuments.length > 0) {
-            // If no index provided, try to preserve current document if URL hasn't changed
-            if (newIndex === undefined && this.documents.length > 0 && this.currentIndex >= 0 && this.currentIndex < this.documents.length) {
-              const currentDocumentUrl = this.documents[this.currentIndex].url;
-              const sameDocumentIndex = newDocuments.findIndex((doc) => doc.url === currentDocumentUrl);
-              if (sameDocumentIndex >= 0) {
-                newIndex = sameDocumentIndex;
-                console.log("Preserving current document at new index:", newIndex, "URL:", currentDocumentUrl);
-              } else {
-                newIndex = 0;
-              }
-            } else if (newIndex === undefined) {
-              newIndex = 0;
-            }
-
-            this.cleanupCachedIframes();
-
-            this.documents.length = 0;
-            this.documents.push(...newDocuments);
-            this.isGalleryMode = newDocuments.length > 1;
-
-            // Update current index
-            this.currentIndex = Math.max(0, Math.min(newIndex, this.documents.length - 1));
-
-            // Update URL with new documents and index
-            const documentsParam = encodeURIComponent(JSON.stringify(this.documents));
-            const newUrl = `${window.location.pathname}?documents=${documentsParam}&index=${this.currentIndex}`;
-            window.history.replaceState({}, "", newUrl);
-
-            // Hide loader and initialize document viewer with new data
-            this.hideLoader();
-            this.setupGalleryNavigation();
-            this.loadDocument(this.currentIndex);
-            this.showDocumentDescription();
-            this.updateFullscreenButtonPosition();
-
-            console.log("Documents updated via postMessage:", this.documents.length, "documents, index:", this.currentIndex);
-            // console.log("Document array after update:", this.documents);
-          } else if (Array.isArray(newDocuments) && newDocuments.length === 0) {
-            // Handle empty array - clear everything
-            this.cleanupCachedIframes();
-
-            this.documents.length = 0;
-            this.isGalleryMode = false;
-            this.currentIndex = -1;
-
-            // Clear URL parameters
-            const newUrl = window.location.pathname;
-            window.history.replaceState({}, "", newUrl);
-
-            // Hide all UI elements
-            this.hideAllViewers();
-            this.hideNavButtons();
-            this.hideFileName();
-            this.hideFullscreenButton();
-
-            console.log("Documents cleared via postMessage - showing empty state");
-          }
-        } else if (type === "selectDocument") {
-          // Handle document selection by url or index
-          const {
-            url,
-            index
-          } = payload;
-          let targetIndex = -1;
-
-          if (typeof index === "number" && index >= 0 && index < this.documents.length) {
-            // Select by index
-            targetIndex = index;
-            console.log("Selecting document by index:", index);
-          } else if (url) {
-            // Select by URL
-            targetIndex = this.documents.findIndex((doc) => doc.url === url);
-            console.log("Selecting document by URL:", url, "found at index:", targetIndex);
-          }
-
-          if (targetIndex >= 0 && targetIndex < this.documents.length) {
-            this.currentIndex = targetIndex;
-
-            // Update URL with new index
-            const documentsParam = encodeURIComponent(JSON.stringify(this.documents));
-            const newUrl = `${window.location.pathname}?documents=${documentsParam}&index=${this.currentIndex}`;
-            window.history.replaceState({}, "", newUrl);
-
-            // Load the selected document
-            this.loadDocument(this.currentIndex);
-            this.showDocumentDescription();
-            this.updateNavButtonVisibility();
-
-            console.log("Document selected successfully, new index:", this.currentIndex);
-          } else {
-            console.warn("Document not found for selection criteria:", {
-              url,
-              index
-            });
-          }
-        }
-      });
-    }
-
-    initializeDocuments() {
-      if (!this.documents.length || !this.documents[0] || !this.documents[0].url) {
-        console.log("No document URL provided.");
-        this.hideLoader();
-        return;
-      }
-
-      if (!this.validateUrl(this.documents[0].url)) {
-        console.error("Недопустимый URL");
-        this.hideLoader();
-        return;
-      }
-    }
-
-    showNavButtons() {
-      this.hideOverlay();
-
-      // Update fullscreen button position based on scrollbar presence
-      this.updateFullscreenButtonPosition();
-
-      // Show fullscreen button if allowed and not video format (always show, even for single files)
-      if (this.shouldShowFullscreenButton()) {
-        this.fullscreenBtn.classList.remove("fade-out");
-      }
-
-      // Show navigation buttons only in gallery mode
-      if (this.isGalleryMode) {
-        if (this.currentIndex === 0) {
-          this.galleryNavPrev.classList.add("fade-out");
-        } else {
-          this.galleryNavPrev.classList.remove("fade-out");
-        }
-
-        if (this.currentIndex === this.documents.length - 1) {
-          this.galleryNavNext.classList.add("fade-out");
-        } else {
-          this.galleryNavNext.classList.remove("fade-out");
-        }
-      }
-
-      clearTimeout(this.hideNavTimeout);
-      this.hideNavTimeout = setTimeout(() => {
-        if (this.isGalleryMode) {
-          this.galleryNavPrev.classList.add("fade-out");
-          this.galleryNavNext.classList.add("fade-out");
-        }
-        if (this.shouldShowFullscreenButton()) {
-          this.fullscreenBtn.classList.add("fade-out");
-        }
-        this.showOverlay();
-      }, 2000);
-    }
-
-    hideNavButtons() {
-      clearTimeout(this.hideNavTimeout);
-      if (this.isGalleryMode) {
-        this.galleryNavPrev.classList.add("fade-out");
-        this.galleryNavNext.classList.add("fade-out");
-      }
-      if (this.shouldShowFullscreenButton()) {
-        this.fullscreenBtn.classList.add("fade-out");
-      }
-      this.showOverlay();
-    }
-
-    updateUrlWithIndex(index) {
-      try {
-        const url = new URL(window.location);
-        url.searchParams.set("index", index);
-        const urlString = url.toString();
-
-        history.replaceState(null, "", urlString);
-      } catch (error) {
-        console.log("Failed to update URL:", error.message);
-        // Continue without updating URL - functionality still works
-      }
-    }
-
-    showDocumentDescription() {
-      const currentDoc = this.documents[this.currentIndex];
-      if (!currentDoc) return;
-
-
-      let description = currentDoc.description;
-      if (!description || description.trim() === "" || description === "Document") {
-        description = `Документ №${this.currentIndex + 1}`;
-      }
-
-      this.descriptionDisplay.innerHTML = '';
-      this.descriptionDisplay.className = "description-display";
-      this.descriptionDisplay.classList.remove("hidden", "fade-out");
-
-      if (currentDoc.showAsLink) {
-        this.descriptionDisplay.classList.add("show-as-link");
-      } else {
-        this.descriptionDisplay.classList.remove("show-as-link");
-      }
-
-      const descriptionText = document.createElement('div');
-      descriptionText.className = 'description-text';
-      descriptionText.textContent = description;
-      this.descriptionDisplay.appendChild(descriptionText);
-
-      clearTimeout(this.hideFileNameTimeout);
-
-      // Handle showAsLink documents
-      if (currentDoc.showAsLink) {
-        const documentUrl = this.getCurrentDocument();
-
-        if (!documentUrl) {
-          const errorDiv = document.createElement('div');
-          errorDiv.style.color = 'red';
-          errorDiv.style.fontSize = '12px';
-          errorDiv.textContent = 'Ошибка: URL документа не найден';
-          this.descriptionDisplay.appendChild(errorDiv);
-        } else {
-          const openLink = document.createElement('a');
-          openLink.className = 'open-link-btn';
-          openLink.href = documentUrl;
-          openLink.target = '_blank';
-          openLink.textContent = 'Перейти за посиланням';
-          this.descriptionDisplay.appendChild(openLink);
-        }
-
-        // Don't set timeout for showAsLink documents - they stay visible
-        return;
-      }
-
-      this.hideFileNameTimeout = setTimeout(() => {
-        this.descriptionDisplay.classList.add("fade-out");
-        setTimeout(() => {
-          this.descriptionDisplay.classList.add("hidden");
-        }, 300);
-      }, 5000);
-    }
-
-    setupGalleryNavigation() {
-      if (!this.isGalleryMode) {
-        this.galleryNavPrev.classList.add("hidden");
-        this.galleryNavNext.classList.add("hidden");
-
-        if (this.galleryNavPrevHandler) {
-          this.galleryNavPrev.removeEventListener("click", this.galleryNavPrevHandler);
-          this.galleryNavPrevHandler = null;
-        }
-        if (this.galleryNavNextHandler) {
-          this.galleryNavNext.removeEventListener("click", this.galleryNavNextHandler);
-          this.galleryNavNextHandler = null;
-        }
-      } else {
-        this.galleryNavPrev.classList.remove("hidden");
-        this.galleryNavNext.classList.remove("hidden");
-
-        if (this.galleryNavPrevHandler) {
-          this.galleryNavPrev.removeEventListener("click", this.galleryNavPrevHandler);
-        }
-        if (this.galleryNavNextHandler) {
-          this.galleryNavNext.removeEventListener("click", this.galleryNavNextHandler);
-        }
-
-        this.galleryNavPrevHandler = () => {
-          if (this.currentIndex > 0) {
-            this.currentIndex--;
-            this.loadDocument(this.currentIndex);
-            this.updateUrlWithIndex(this.currentIndex);
-            this.showNavButtons();
-            this.showDocumentDescription();
-          }
+    getFilesSnapshot() {
+      return Array.from(this.fileItemsContainer.querySelectorAll(".file-item")).map((item, i) => {
+        const doc = {
+          index: i,
+          format: item.dataset.format,
+          description: item.dataset.description || "",
         };
 
-        this.galleryNavNextHandler = () => {
-          if (this.currentIndex < this.documents.length - 1) {
-            this.currentIndex++;
-            this.loadDocument(this.currentIndex);
-            this.updateUrlWithIndex(this.currentIndex);
-            this.showNavButtons();
-            this.showDocumentDescription();
-          }
+        if (item.dataset.fileName && item.dataset.fileName.trim() !== "") {
+          doc.fileName = item.dataset.fileName;
+        }
+
+        if (item.dataset.url && item.dataset.url.trim() !== "") {
+          doc.url = item.dataset.url;
+        }
+
+        return doc;
+      });
+    }
+
+    getFileIcon(format) {
+      if (format === 'web') {
+        return '<svg viewBox="0 0 200 200"><use xlink:href="#doc-link"/></svg>';
+      }
+
+      if (format && format.includes('/')) {
+        const textIcon = '<svg viewBox="0 0 24 24"><use xlink:href="#doc-text"/></svg>';
+
+        const textMimeTypes = [
+          'text/plain',
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.oasis.opendocument.text',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        ];
+
+        if (textMimeTypes.includes(format.toLowerCase())) {
+          return textIcon;
+        }
+
+        const mimePrefix = format.split('/')[0].toLowerCase();
+        const iconMap = {
+          'audio': '<svg viewBox="0 0 200 200"><use xlink:href="#doc-audio"/></svg>',
+          'image': '<svg viewBox="0 0 200 200"><use xlink:href="#doc-image"/></svg>',
+          'video': '<svg viewBox="0 0 200 200"><use xlink:href="#doc-video"/></svg>',
+          'text': textIcon,
+          'application': textIcon
         };
-
-        this.galleryNavPrev.addEventListener("click", this.galleryNavPrevHandler);
-        this.galleryNavNext.addEventListener("click", this.galleryNavNextHandler);
-
-        this.updateNavButtonVisibility();
+        return iconMap[mimePrefix] || '<svg viewBox="0 0 24 24"><use xlink:href="#doc-unknown"/></svg>';
       }
 
-      document.body.addEventListener("mousemove", () => this.showNavButtons());
-      document.body.addEventListener("touchstart", () => this.showNavButtons());
+      const legacyIconMap = {
+        'audio': '<svg viewBox="0 0 200 200"><use xlink:href="#doc-audio"/></svg>',
+        'image': '<svg viewBox="0 0 200 200"><use xlink:href="#doc-image"/></svg>',
+        'link': '<svg viewBox="0 0 200 200"><use xlink:href="#doc-link"/></svg>',
+        'text': '<svg viewBox="0 0 24 24"><use xlink:href="#doc-text"/></svg>',
+        'video': '<svg viewBox="0 0 200 200"><use xlink:href="#doc-video"/></svg>',
+        'file': '<svg viewBox="0 0 24 24"><use xlink:href="#doc-text"/></svg>'
+      };
+      return legacyIconMap[format] || '<svg viewBox="0 0 24 24"><use xlink:href="#doc-unknown"/></svg>';
     }
 
-    setupFullscreenButton() {
-      // Setup fullscreen button (called after document loads to check format)
-      if (this.shouldShowFullscreenButton()) {
-        this.fullscreenBtn.classList.remove("hidden");
-        this.fullscreenBtn.addEventListener("click", () => this.toggleFullscreen());
-      } else {
-        this.fullscreenBtn.classList.add("hidden");
-      }
+
+    setup_native_overflow_tooltip(el) {
+      const apply_title = () => {
+        el.title = el.scrollWidth > el.clientWidth ? el.textContent : '';
+      };
+
+      el.addEventListener('mouseenter', apply_title);
+
+      apply_title();
     }
 
-    updateNavButtonVisibility() {
-      if (!this.isGalleryMode) return;
 
-      if (this.currentIndex === 0) {
-        this.galleryNavPrev.classList.add("fade-out");
-      } else {
-        this.galleryNavPrev.classList.remove("fade-out");
-      }
 
-      if (this.currentIndex === this.documents.length - 1) {
-        this.galleryNavNext.classList.add("fade-out");
-      } else {
-        this.galleryNavNext.classList.remove("fade-out");
-      }
-    }
-
-    getCurrentDocument() {
-      return this.documents[this.currentIndex] ? this.documents[this.currentIndex].url : "";
-    }
-
-    detectFormatFromUrl(url) {
-      if (!url) return "";
-
-      try {
-        const urlObj = new URL(url);
-        const hostname = urlObj.hostname.toLowerCase();
-        const pathname = urlObj.pathname.toLowerCase();
-
-        if (hostname === "www.youtube.com" || hostname === "youtube.com" || hostname === "m.youtube.com") {
-          if (pathname.includes("/watch") || pathname.includes("/shorts") || pathname.includes("/embed") || pathname.includes("/v/")) {
-            return "video/youtube";
-          }
+    recalcDocuments() {
+      const items = this.fileItemsContainer.querySelectorAll(".file-item");
+      items.forEach((item, i) => {
+        const desc = item.dataset.description;
+        const name = item.dataset.fileName || item.dataset.url;
+        const mask = this.cfg.localization.defaultDescriptionMask.replace("{{n}}", i + 1);
+        const content = item.querySelector(".file-content");
+        // Clear previous
+        while (content.firstChild) {
+          content.removeChild(content.firstChild);
         }
-
-        if (hostname === "youtu.be") {
-          return "video/youtube";
-        }
-
-        if (hostname === "docs.google.com") {
-          if (pathname.includes("/document") || pathname.includes("/d/")) {
-            return "application/google-docs";
-          }
-        }
-
-        if (hostname === "sheets.google.com") {
-          if (pathname.includes("/spreadsheets") || pathname.includes("/d/")) {
-            return "application/google-sheets";
-          }
-        }
-
-        if (hostname === "slides.google.com") {
-          if (pathname.includes("/presentation") || pathname.includes("/d/")) {
-            return "application/google-slides";
-          }
-        }
-
-        if (hostname === "drive.google.com") {
-          if (pathname.includes("/file/d/")) {
-            return "application/google-drive";
-          }
-        }
-
-        return "";
-      } catch (error) {
-        console.error("Error detecting format from URL:", error);
-        return "";
-      }
-    }
-
-    getCurrentFormat() {
-      if (!this.documents[this.currentIndex]) return "";
-
-      const explicitFormat = this.documents[this.currentIndex].format;
-      if (explicitFormat) {
-        return explicitFormat;
-      }
-
-      const url = this.documents[this.currentIndex].url;
-      const detectedFormat = this.detectFormatFromUrl(url);
-
-      if (detectedFormat) {
-        console.log(`Auto-detected format: ${detectedFormat} for URL: ${url}`);
-        return detectedFormat;
-      }
-
-      return "";
-    }
-
-    cleanupCurrentViewer() {
-      this.iframe.classList.add("hidden");
-      this.plainTextWrapper.classList.add("hidden");
-      this.adobeViewer.classList.add("hidden");
-      this.unsupportedFormat.classList.add("hidden");
-      document.getElementById("imageViewer").classList.add("hidden");
-
-      if (this.currentCachedIframe) {
-        this.currentCachedIframe.classList.add("hidden");
-        this.currentCachedIframe.style.display = 'none';
-      }
-
-      this.iframe.classList.remove("microsoft-viewer-fix");
-      this.iframe.src = "";
-      this.plainTextContainer.innerText = "";
-
-      const existingVideo = document.getElementById("videoPlayer");
-      if (existingVideo) {
-        existingVideo.remove();
-      }
-
-      if (this.currentViewer && this.currentViewer.destroy) {
-        this.currentViewer.destroy();
-      }
-      this.currentViewer = null;
-    }
-
-    hideLoader() {
-      this.loader.classList.toggle("hidden", true);
-    }
-
-    getQueryParameter(param) {
-      const params = new URLSearchParams(window.location.search);
-      return params.get(param);
-    }
-
-    showUnsupportedFormat() {
-      this.unsupportedFormat.classList.remove("hidden");
-      this.hideLoader();
-    }
-
-
-    getCacheKey(documentUrl, format) {
-      return `${format}:${documentUrl}`;
-    }
-
-    getOrCreateCachedIframe(documentUrl, format) {
-      const cacheKey = this.getCacheKey(documentUrl, format);
-
-      if (this.iframeCache.has(cacheKey)) {
-        console.log('Using cached iframe for:', cacheKey);
-        return this.iframeCache.get(cacheKey);
-      }
-
-      const newIframe = document.createElement('iframe');
-      newIframe.className = 'viewer-iframe';
-      newIframe.frameBorder = '0';
-      newIframe.allowFullscreen = true;
-      newIframe.setAttribute('mozallowfullscreen', 'true');
-      newIframe.setAttribute('webkitallowfullscreen', 'true');
-      newIframe.style.display = 'none'; // Start hidden
-
-      document.body.appendChild(newIframe);
-
-      if (this.iframeCache.size >= this.MAX_CACHED_IFRAMES) {
-        const oldestKey = this.iframeCache.keys().next().value;
-        const oldestIframe = this.iframeCache.get(oldestKey);
-        if (oldestIframe && oldestIframe.parentNode) {
-          oldestIframe.parentNode.removeChild(oldestIframe);
-        }
-        this.iframeCache.delete(oldestKey);
-        console.log('Removed oldest cached iframe:', oldestKey);
-      }
-
-      this.iframeCache.set(cacheKey, newIframe);
-      console.log('Created and cached new iframe for:', cacheKey);
-
-      return newIframe;
-    }
-
-    showCachedIframe(targetIframe) {
-      if (this.currentCachedIframe && this.currentCachedIframe !== targetIframe) {
-        this.currentCachedIframe.style.display = 'none';
-        this.currentCachedIframe.classList.add('hidden');
-      }
-
-      this.iframe.classList.add('hidden');
-      this.iframe.style.display = 'none';
-
-      targetIframe.style.display = 'block';
-      targetIframe.classList.remove('hidden');
-      this.currentCachedIframe = targetIframe;
-    }
-
-    cleanupCachedIframes() {
-      this.iframeCache.forEach((cachedIframe, key) => {
-        if (cachedIframe && cachedIframe.parentNode) {
-          cachedIframe.parentNode.removeChild(cachedIframe);
+        // File name
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "file-name";
+        nameSpan.textContent = name;
+        content.appendChild(nameSpan);
+        this.setup_native_overflow_tooltip(nameSpan);
+        // Description - need to get per-document setting from dataset
+        const showDesc = item.dataset.showDescription !== undefined ?
+          item.dataset.showDescription === 'true' : this.cfg.showDescription;
+        if (showDesc) {
+          const descSpan = document.createElement("span");
+          descSpan.className = "description" + (desc ? "" : " mock-description");
+          descSpan.textContent = desc || mask;
+          content.appendChild(descSpan);
         }
       });
-      this.iframeCache.clear();
-      this.currentCachedIframe = null;
-      console.log('Cleaned up all cached iframes');
     }
 
-    async fetchBinaryData(url) {
-      try {
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch: ${response.status}`);
-        }
-        return await response.arrayBuffer();
-      } catch (error) {
-        console.error("Error fetching binary data:", error);
-        throw error;
-      }
-    }
+    createItemElement(doc) {
+      const {
+        format,
+        fileName,
+        description = "",
+        url
+      } = doc;
+      const div = document.createElement("div");
+      div.className = "file-item";
+      div.dataset.fileName = fileName || "";
+      div.dataset.description = description;
+      div.dataset.url = url || "";
+      div.dataset.format = format;
+      div.dataset.showDescription = doc.showDescription !== undefined ? doc.showDescription.toString() : this.cfg.showDescription.toString();
 
-    detectEncoding(uint8Array) {
-      // Проверка BOM
-      if (uint8Array.length >= 3 && uint8Array[0] === 0xef && uint8Array[1] === 0xbb && uint8Array[2] === 0xbf) {
-        return "utf-8";
-      }
-      if (uint8Array.length >= 2 && uint8Array[0] === 0xff && uint8Array[1] === 0xfe) return "utf-16le";
-      if (uint8Array.length >= 2 && uint8Array[0] === 0xfe && uint8Array[1] === 0xff) return "utf-16be";
-
-      // Анализ частотности для кириллицы
-      let cp1251Score = 0,
-        cp866Score = 0;
-      const sampleSize = Math.min(uint8Array.length, 1000);
-
-      for (let i = 0; i < sampleSize; i++) {
-        const byte = uint8Array[i];
-        // CP1251: А-Я (0xC0-0xDF), а-я (0xE0-0xFF)
-        if ((byte >= 0xc0 && byte <= 0xdf) || (byte >= 0xe0 && byte <= 0xff)) cp1251Score++;
-        // CP866: А-П (0x80-0x8F), Р-Я (0x90-0x9F), а-п (0xA0-0xAF), р-я (0xE0-0xEF)
-        if ((byte >= 0x80 && byte <= 0xaf) || (byte >= 0xe0 && byte <= 0xef)) cp866Score++;
+      // Icon
+      const showIcon = doc.showDocumentIcon !== undefined ? doc.showDocumentIcon : this.cfg.showDocumentIcon;
+      if (showIcon) {
+        const icon = document.createElement("span");
+        icon.className = "file-icon";
+        const iconSvg = this.getFileIcon(format);
+        icon.innerHTML = iconSvg;
+        div.appendChild(icon);
       }
 
-      return cp1251Score > cp866Score ? "windows-1251" : "ibm866";
-    }
+      // Content container
+      const contentContainer = document.createElement("div");
+      contentContainer.className = "file-content";
+      div.appendChild(contentContainer);
 
-    decodeBinaryData(arrayBuffer) {
-      const uint8Array = new Uint8Array(arrayBuffer);
+      const canEdit = doc.canEdit !== undefined ? doc.canEdit : this.cfg.canEdit;
+      const canDelete = doc.canDelete !== undefined ? doc.canDelete : this.cfg.canDelete;
 
-      try {
-        const utf8Decoder = new TextDecoder("utf-8", {
-          fatal: true,
-        });
-        const utf8Decoded = utf8Decoder.decode(uint8Array);
-        console.log("Text successfully decoded as UTF-8");
-        return utf8Decoded;
-      } catch (e) {
-        console.log("Failed to decode as UTF-8, trying other encodings");
-      }
+      if (canEdit || canDelete) {
+        const actionsContainer = document.createElement("div");
+        actionsContainer.style.display = "flex";
 
-      const encoding = this.detectEncoding(uint8Array);
-      const decoder = new TextDecoder(encoding);
-      const decoded = decoder.decode(uint8Array);
-      console.log(`Text successfully decoded as ${encoding === "ibm866" ? "OEM" : encoding}`);
-      return decoded;
-    }
-
-    isBrowserHasPDFViewer() {
-      // Modern borwsers
-      if (navigator.pdfViewerEnabled !== undefined) {
-        return navigator.pdfViewerEnabled;
-      }
-
-      // Old browsers or not compatible with pdfViewerEnabled like Safari
-      let hasPDFViewer = false;
-      try {
-        var hasPluginEnabled = navigator.mimeTypes && navigator.mimeTypes["application/pdf"] ? navigator.mimeTypes["application/pdf"].enabledPlugin : null;
-        if (hasPluginEnabled) {
-          hasPDFViewer = true;
-        }
-      } catch (e) {
-        hasPDFViewer = false;
-      }
-
-      return hasPDFViewer;
-    }
-
-    loadAdobeSdk() {
-      return new Promise((resolve, reject) => {
-        if (document.getElementById("adobe-sdk-script")) {
-          resolve(); // SDK already loaded
-          return;
+        if (canEdit) {
+          const editBtn = document.createElement("button");
+          editBtn.className = "action-button";
+          editBtn.innerHTML = '<svg viewBox="0 0 200 200"><use xlink:href="#edit-pencil"/></svg>';
+          editBtn.setAttribute("aria-label", "Edit");
+          actionsContainer.appendChild(editBtn);
         }
 
-        const script = document.createElement("script");
-        script.id = "adobe-sdk-script";
-        script.src = "https://acrobatservices.adobe.com/view-sdk/viewer.js";
-        script.type = "text/javascript";
-        script.onload = () => resolve();
-        script.onerror = () => reject(new Error("Failed to load Adobe SDK script"));
+        if (canDelete) {
+          const deleteBtn = document.createElement("button");
+          deleteBtn.className = "action-button";
+          deleteBtn.innerHTML = '<svg viewBox="0 0 20 20"><use xlink:href="#delete-cross"/></svg>';
+          deleteBtn.setAttribute("aria-label", "Delete");
+          actionsContainer.appendChild(deleteBtn);
+        }
 
-        document.head.appendChild(script);
-      });
-    }
-
-    setupViewerJs(documentUrl) {
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = "https://cdnjs.cloudflare.com/ajax/libs/viewerjs/1.11.6/viewer.min.css";
-      if (!document.querySelector('link[href*="viewerjs"]')) {
-        document.head.appendChild(link);
+        div.appendChild(actionsContainer);
       }
 
-      const script = document.createElement("script");
-      script.src = "https://cdnjs.cloudflare.com/ajax/libs/viewerjs/1.11.6/viewer.min.js";
-
-      script.onload = function () {
-        const imageElement = document.getElementById("imageViewer");
-        imageElement.src = documentUrl;
-
-        this.currentViewer = new Viewer(imageElement, {
-          inline: true,
-          fullscreen: true,
-          backdrop: false,
-          button: false,
-          navbar: false,
-          title: false,
-          toolbar: {
-            zoomIn: true,
-            zoomOut: true,
-            oneToOne: true,
-            reset: true,
-            rotateLeft: true,
-            rotateRight: true,
+      // Click event
+      const canClick = doc.canClick !== undefined ? doc.canClick : this.cfg.canClick;
+      if (canClick) {
+        div.addEventListener("click", () => {
+          window.parent.postMessage({
+            type: "documentClicked",
+            appName: "scPostMessage",
+            ...this.relayToComponentSnippet,
+            payload: {
+              documents: this.getFilesSnapshot(),
+              index: [...this.fileItemsContainer.children].indexOf(div)
+            },
           },
-          zoomRatio: 0.4,
+            "*"
+          );
         });
-
-        this.hideLoader();
-      }.bind(this);
-
-      if (!document.querySelector('script[src*="viewerjs"]')) {
-        document.body.appendChild(script);
-      } else {
-        script.onload();
       }
+
+      this.attachItemMenu(div);
+      return div;
     }
 
-    setupAdobeViewer(documentUrl) {
-      document.addEventListener("adobe_dc_view_sdk.ready", function () {
-        var adobeDCView = new AdobeDC.View({
-          clientId: this.adobeClientId,
-          divId: "adobeViewer",
-        });
-        adobeDCView
-          .previewFile({
-            content: {
-              location: {
-                url: documentUrl,
+    attachItemMenu(item) {
+      const editBtn = item.querySelector(".action-button[aria-label='Edit']");
+      const deleteBtn = item.querySelector(".action-button[aria-label='Delete']");
+
+      editBtn?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const index = [...this.fileItemsContainer.children].indexOf(item);
+        window.parent.postMessage({
+          type: "editDocumentRequest",
+          appName: "scPostMessage",
+          ...this.relayToComponentSnippet,
+          payload: {
+            documents: this.getFilesSnapshot(),
+            index
+          },
+        },
+          "*"
+        );
+      });
+
+      deleteBtn?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const idx = [...this.fileItemsContainer.children].indexOf(item);
+        const deletedDoc = {
+          fileName: item.dataset.fileName,
+          url: item.dataset.url,
+          description: item.dataset.description
+        };
+        item.remove();
+        this.recalcDocuments();
+        window.parent.postMessage({
+          type: "documentsChanged",
+          appName: "scPostMessage",
+          ...this.relayToComponentSnippet,
+          payload: {
+            documents: this.getFilesSnapshot(),
+            actionType: "delete",
+            deletedDoc,
+            deletedIndex: idx
+          },
+        },
+          "*"
+        );
+      });
+    }
+
+    bindStaticEvents() {
+      this.fileSelectLink = this.rootEl.querySelector("#fileSelectLink");
+      this.fileSelectLink.addEventListener("click", (e) => {
+        e.preventDefault();
+        this.fileInput.click();
+      });
+      this.fileInput.addEventListener("change", (e) => this.uploadFiles(Array.from(e.target.files)));
+
+      let dragCounter = 0;
+
+      this.fileDropArea.addEventListener("dragenter", (e) => {
+        e.preventDefault();
+        dragCounter++;
+        if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes('application/x-moz-file')) {
+          e.dataTransfer.dropEffect = "copy";
+          this.fileDropArea.classList.add("dragover");
+          console.log("dragenter: added dragover class, counter:", dragCounter);
+        }
+      });
+
+      this.fileDropArea.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes('application/x-moz-file')) {
+          e.dataTransfer.dropEffect = "copy";
+        }
+      });
+
+      this.fileDropArea.addEventListener("dragleave", (e) => {
+        e.preventDefault();
+        dragCounter--;
+        if (dragCounter === 0) {
+          this.fileDropArea.classList.remove("dragover");
+          console.log("dragleave: removed dragover class, counter:", dragCounter);
+        }
+      });
+
+      this.fileDropArea.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dragCounter = 0;
+        this.fileDropArea.classList.remove("dragover");
+        console.log("drop: removed dragover class");
+
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          this.uploadFiles(Array.from(e.dataTransfer.files));
+        }
+      });
+
+      this.addWebBtn?.addEventListener("click", () => {
+        window.parent.postMessage({
+          type: "addWebResourceRequest",
+          appName: "scPostMessage",
+          ...this.relayToComponentSnippet,
+          payload: {
+            documents: this.getFilesSnapshot()
+          },
+        },
+          "*"
+        );
+      });
+
+      this.addAudioBtn?.addEventListener("click", () => {
+        window.parent.postMessage({
+          type: "addAudioRecordRequest",
+          appName: "scPostMessage",
+          ...this.relayToComponentSnippet,
+          payload: {
+            documents: this.getFilesSnapshot()
+          },
+        },
+          "*"
+        );
+      });
+    }
+
+    initSortable() {
+      let initialOrder = [];
+
+      Sortable.create(this.fileItemsContainer, {
+        animation: 150,
+        ghostClass: "sortable-ghost",
+        onStart: () => {
+          initialOrder = Array.from(this.fileItemsContainer.children);
+        },
+        onEnd: () => {
+          this.recalcDocuments();
+
+          const currentOrder = Array.from(this.fileItemsContainer.children);
+          const orderChanged = !initialOrder.every((node, index) => node === currentOrder[index]);
+
+          if (orderChanged) {
+            window.parent.postMessage({
+              type: "documentsChanged",
+              appName: "scPostMessage",
+              ...this.relayToComponentSnippet,
+              payload: {
+                documents: this.getFilesSnapshot(),
+                actionType: "reorder"
               },
             },
-            metaData: {
-              fileName: "PDF Document",
-            },
-          })
-          .then(this.hideLoader);
-      }.bind(this));
-      this.iframe.classList.toggle("hidden", true);
-      this.adobeViewer.classList.toggle("hidden", false);
-    }
-
-    convertToYouTubeEmbedUrl(url, autoplay = false, controls = true) {
-      try {
-        const urlObj = new URL(url);
-        let videoId = "";
-        const hostname = urlObj.hostname.toLowerCase();
-        const pathname = urlObj.pathname;
-
-        if (hostname === "www.youtube.com" || hostname === "youtube.com" || hostname === "m.youtube.com") {
-          if (pathname.includes("/watch")) {
-            videoId = urlObj.searchParams.get("v");
-          } else if (pathname.includes("/shorts/")) {
-            videoId = pathname.split("/shorts/")[1]?.split("?")[0];
-          } else if (pathname.includes("/embed/")) {
-            videoId = pathname.split("/embed/")[1]?.split("?")[0];
-          } else if (pathname.includes("/v/")) {
-            videoId = pathname.split("/v/")[1]?.split("?")[0];
+              "*"
+            );
           }
-        } else if (hostname === "youtu.be") {
-          videoId = pathname.slice(1).split("?")[0];
-        }
-
-        if (!videoId) {
-          throw new Error("Invalid YouTube URL - could not extract video ID");
-        }
-
-        const embedUrl = new URL(`https://www.youtube.com/embed/${videoId}`);
-        if (autoplay) embedUrl.searchParams.set("autoplay", "1");
-        if (!controls) embedUrl.searchParams.set("controls", "0");
-        embedUrl.searchParams.set("rel", "0");
-
-        return embedUrl.toString();
-      } catch (error) {
-        console.error("Error converting YouTube URL:", error);
-        return null;
-      }
-    }
-
-    setupYouTubeViewer(documentUrl) {
-      const currentDoc = this.documents[this.currentIndex];
-      const autoplay = currentDoc.autoplay || false;
-      const controls = currentDoc.controls !== false; // default to true
-
-      const embedUrl = this.convertToYouTubeEmbedUrl(documentUrl, autoplay, controls);
-
-      if (!embedUrl) {
-        this.showUnsupportedFormat();
-        return;
-      }
-
-      const cachedIframe = this.getOrCreateCachedIframe(documentUrl, 'video/youtube');
-
-      // Only set src if it's different (avoid reloading)
-      if (cachedIframe.src !== embedUrl) {
-        cachedIframe.src = embedUrl;
-        cachedIframe.addEventListener("load", () => this.hideLoader(), {
-          once: true,
-        });
-      } else {
-        this.hideLoader();
-      }
-
-      this.showCachedIframe(cachedIframe);
-    }
-
-    setupGoogleDocsViewer(documentUrl) {
-      const currentDoc = this.documents[this.currentIndex];
-      let embedUrl = documentUrl;
-
-      try {
-        const urlObj = new URL(embedUrl);
-        if (currentDoc.readonly !== undefined) {
-          urlObj.searchParams.set("rm", currentDoc.readonly ? "minimal" : "full");
-        }
-        if (currentDoc.rm) {
-          urlObj.searchParams.set("rm", currentDoc.rm);
-        }
-        embedUrl = urlObj.toString();
-      } catch (error) {
-        console.error("Error processing Google Docs URL:", error);
-      }
-
-      const format = this.getCurrentFormat();
-      const cachedIframe = this.getOrCreateCachedIframe(documentUrl, format);
-
-      // Only set src if it's different (avoid reloading)
-      if (cachedIframe.src !== embedUrl) {
-        cachedIframe.src = embedUrl;
-        cachedIframe.addEventListener("load", () => this.hideLoader(), {
-          once: true,
-        });
-      } else {
-        this.hideLoader();
-      }
-
-      this.showCachedIframe(cachedIframe);
-    }
-
-    setupVideoViewer(documentUrl) {
-      const currentDoc = this.documents[this.currentIndex];
-      const autoplay = currentDoc.autoplay || false;
-      const controls = currentDoc.controls !== false;
-      const loop = currentDoc.loop || false;
-
-      this.cleanupCurrentViewer();
-
-      const videoElement = document.createElement("video");
-      videoElement.id = "videoPlayer";
-      videoElement.className = "viewer-iframe";
-      videoElement.src = documentUrl;
-      videoElement.controls = controls;
-      videoElement.autoplay = autoplay;
-      videoElement.loop = loop;
-      videoElement.style.width = "100%";
-      videoElement.style.height = "100%";
-      videoElement.style.objectFit = "contain";
-
-      this.iframe.classList.add("hidden");
-      document.body.appendChild(videoElement);
-
-      videoElement.addEventListener("loadeddata", () => this.hideLoader(), {
-        once: true,
-      });
-
-      videoElement.addEventListener("error", () => {
-        console.error("Error loading video:", documentUrl);
-        this.showUnsupportedFormat();
+        },
       });
     }
 
-    loadDocument(index) {
-      if (index < 0 || index >= this.documents.length) return;
+    applyOverlay() {
+      if (!this.pendingOverlay) {
+        const overlay = document.createElement("div");
+        overlay.className = "file-drop-overlay";
+        this.fileDropArea.appendChild(overlay);
+        this.pendingOverlay = overlay;
+      }
+    }
 
-      this.currentIndex = index;
-      const documentUrl = this.getCurrentDocument();
-      const currentDoc = this.documents[this.currentIndex];
+    removeOverlay() {
+      if (this.pendingOverlay) {
+        this.pendingOverlay.remove();
+        this.pendingOverlay = null;
+      }
+    }
 
-      // Check if document should be shown as link only
-      if (currentDoc && currentDoc.showAsLink) {
-        this.cleanupCurrentViewer();
-        this.hideLoader();
-        this.showDocumentDescription();
-        this.updateNavButtonVisibility();
-        this.setupFullscreenButton();
+    uploadFiles(files) {
+      if (this.getFilesSnapshot().length + files.length > this.cfg.fileLimit) {
+        const msg = this.cfg.localization.fileLimitExceeded.replace("{{limit}}", this.cfg.fileLimit);
+        alert(msg);
         return;
       }
+      this.applyOverlay();
+      // Reset tracking
+      this.pendingRequests.clear();
+      this.uploadResults = {};
 
-      const format = this.getCurrentFormat();
+      files.forEach((file) => {
+        // generate unique requestId
+        const requestId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "req_" + Date.now() + "_" + Math.random().toString(16).slice(2);
+        this.pendingRequests.add(requestId);
 
-      if (!this.validateUrl(documentUrl)) {
-        console.error("Недопустимый URL:", documentUrl);
-        return;
-      }
+        // send upload request without appName
+        window.parent.postMessage({
+          type: "uploadFileRequest",
+          payload: {
+            requestId,
+            file: file
+          },
+        },
+          "*"
+        );
+      });
+    }
 
-      this.cleanupCurrentViewer();
-      this.loader.classList.remove("hidden");
-
-      switch (format) {
-        case "text/plain":
-          this.iframe.classList.add("hidden");
-          this.plainTextWrapper.classList.remove("hidden");
-          console.log("fetching", documentUrl);
-          this.fetchBinaryData(documentUrl).then((arrayBuffer) => {
-            const text = this.decodeBinaryData(arrayBuffer);
-            this.plainTextContainer.innerText = text;
-            this.hideLoader();
+    onHostMessage({
+      data
+    }) {
+      const value = data.id ? data.value : data;
+      const { type, payload } = value || {};
+      switch (type) {
+        case "fileUploaded": {
+          const {
+            requestId,
+            fileData
+          } = payload;
+          // create element for this file
+          const element = this.createItemElement({
+            format: fileData.data.type,        // MIME type from simulator
+            fileName: fileData.data.title,     // Display name from simulator
+            url: `https://sim.simulator.company/api/1.0/download/${fileData.data.fileName}?preview=true`,  // Full URL using download API template
+            description: "",
+            ...(fileData.data.canEdit !== undefined && { canEdit: fileData.data.canEdit }),
+            ...(fileData.data.canDelete !== undefined && { canDelete: fileData.data.canDelete }),
+            ...(fileData.data.canClick !== undefined && { canClick: fileData.data.canClick }),
+            ...(fileData.data.showDocumentIcon !== undefined && { showDocumentIcon: fileData.data.showDocumentIcon }),
+            ...(fileData.data.showDescription !== undefined && { showDescription: fileData.data.showDescription })
           });
-          break;
-        case "application/msword":
-        case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        case "application/vnd.oasis.opendocument.text":
-        case "application/vnd.ms-excel":
-        case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-          const officeUrl = `${this.microsoftViewerUrl}?src=${encodeURIComponent(documentUrl)}`;
-          const officeCachedIframe = this.getOrCreateCachedIframe(documentUrl, format);
-          officeCachedIframe.classList.add("microsoft-viewer-fix");
+          this.fileItemsContainer.appendChild(element);
+          this.recalcDocuments();
+          // store result
+          this.uploadResults[requestId] = fileData.data;
+          this.pendingRequests.delete(requestId);
 
-          if (officeCachedIframe.src !== officeUrl) {
-            officeCachedIframe.src = officeUrl;
-            officeCachedIframe.addEventListener("load", () => this.hideLoader(), {
-              once: true,
-            });
-          } else {
-            this.hideLoader();
+          if (this.pendingRequests.size === 0) {
+            this.removeOverlay();
+            // send unified documentsChanged
+            window.parent.postMessage({
+              type: "documentsChanged",
+              appName: "scPostMessage",
+              ...this.relayToComponentSnippet,
+              payload: {
+                documents: this.getFilesSnapshot(),
+                actionType: "add",
+                addedDocuments: Object.values(this.uploadResults),
+              },
+            },
+              "*"
+            );
           }
-
-          this.showCachedIframe(officeCachedIframe);
-          break;
-        case "application/pdf":
-          if (this.isBrowserHasPDFViewer()) {
-            const pdfCachedIframe = this.getOrCreateCachedIframe(documentUrl, format);
-
-            if (pdfCachedIframe.src !== documentUrl) {
-              pdfCachedIframe.src = documentUrl;
-              pdfCachedIframe.addEventListener("load", () => this.hideLoader(), {
-                once: true,
-              });
-            } else {
-              this.hideLoader();
-            }
-
-            this.showCachedIframe(pdfCachedIframe);
-            break;
-          }
-          this.loadAdobeSdk()
-            .then(() => this.setupAdobeViewer(documentUrl))
-            .catch((error) => {
-              console.error("Error loading Adobe SDK: ", error);
-            });
-          break;
-        case "image/gif":
-        case "image/jpg":
-        case "image/jpeg":
-        case "image/png":
-        case "image/svg+xml":
-        case "image/bmp":
-        case "image/webp":
-          this.setupViewerJs(documentUrl);
-          break;
-        case "video/youtube":
-          this.setupYouTubeViewer(documentUrl);
-          break;
-        case "video/mp4":
-        case "video/webm":
-        case "video/ogg":
-        case "video/avi":
-        case "video/mov":
-        case "video/wmv":
-        case "video/x-matroska":
-          this.setupVideoViewer(documentUrl);
-          break;
-        case "application/google-docs":
-        case "application/google-sheets":
-        case "application/google-slides":
-        case "application/google-drive":
-          this.setupGoogleDocsViewer(documentUrl);
-          break;
-        case "text/html":
-        case "application/xhtml+xml":
-          const htmlCachedIframe = this.getOrCreateCachedIframe(documentUrl, format);
-
-          if (htmlCachedIframe.src !== documentUrl) {
-            htmlCachedIframe.src = documentUrl;
-            htmlCachedIframe.addEventListener("load", () => this.hideLoader(), {
-              once: true,
-            });
-          } else {
-            this.hideLoader();
-          }
-
-          this.showCachedIframe(htmlCachedIframe);
-          break;
-        default:
-          this.showUnsupportedFormat();
-      }
-
-      // Update navigation button visibility after loading
-      this.updateNavButtonVisibility();
-
-      // Setup fullscreen button based on current document format
-      this.setupFullscreenButton();
-    }
-
-    init() {
-      // Initialize event listeners and PostMessage support
-      this.initializeEventListeners();
-      this.initializePostMessageListener();
-      this.initializeDocuments();
-
-      document.addEventListener("DOMContentLoaded", () => {
-        // Only proceed with document loading if we have valid documents
-        if (this.documents.length > 0 && this.documents[0] && this.documents[0].url) {
-          // Validate and set initial index
-          const initialIndex = Math.max(0, Math.min(this.indexParam, this.documents.length - 1));
-          this.currentIndex = initialIndex;
-
-          this.setupGalleryNavigation();
-          this.loadDocument(this.currentIndex);
-          this.showDocumentDescription();
         }
-      });
-    }
+          break;
 
+        case "fileUploadError": {
+          // handle error for a specific requestId if needed
+          const {
+            requestId,
+            error
+          } = payload;
+          console.error(`Upload failed [${requestId}]:`, error);
+          this.pendingRequests.delete(requestId);
+          if (this.pendingRequests.size === 0) {
+            this.removeOverlay();
+          }
+        }
+          break;
+
+        case "changeDocuments": {
+          const {
+            documents
+          } = payload;
+          // clear and render new list
+          while (this.fileItemsContainer.firstChild) {
+            this.fileItemsContainer.removeChild(this.fileItemsContainer.firstChild);
+          }
+          documents.forEach((doc) => {
+            const el = this.createItemElement({
+              format: doc.format,
+              fileName: doc.fileName,
+              url: doc.url,
+              description: doc.description,
+              ...(doc.canEdit !== undefined && { canEdit: doc.canEdit }),
+              ...(doc.canDelete !== undefined && { canDelete: doc.canDelete }),
+              ...(doc.canClick !== undefined && { canClick: doc.canClick }),
+              ...(doc.showDocumentIcon !== undefined && { showDocumentIcon: doc.showDocumentIcon }),
+              ...(doc.showDescription !== undefined && { showDescription: doc.showDescription })
+            });
+            this.fileItemsContainer.appendChild(el);
+          });
+          this.recalcDocuments();
+        }
+          break;
+
+        // existing cases for editDescription handled elsewhere
+
+        default:
+          break;
+      }
+    }
   }
 
-  const viewer = new DocumentViewer();
-  viewer.init();
+  // Initialization example in host page context
+  new DocumentManager(document.getElementById("documentManagerHost"), documents, config);
+  console.log("Document Manager initialized")
 }
 
-const javaScript = `(${setup.toString()})();`;
+const javaScript = `
+const documents = ${JSON.stringify(documents, null, 2)};
+const config = ${JSON.stringify(config, null, 2)};
+
+(${script.toString()})(documents, config);`;
+
+
+
 
 data.javaScript = javaScript;
