@@ -1,5 +1,5 @@
-const documents = data.__request.query_params?.documents ? JSON.parse(decodeURIComponent(data.__request.query_params.documents)) : [];
-const config = data.__request.query_params?.config ? JSON.parse(decodeURIComponent(data.__request.query_params.config)) : {};
+const documents = data.__request.query_params?.documents || [];
+const config = data.__request.query_params?.config || {};
 
 
 
@@ -175,7 +175,7 @@ function script(documents, config) {
     }
 
     getFileIcon(format) {
-      if (format === 'web') {
+      if (format === 'text/html' || format === 'application/xhtml+xml') {
         return '<svg viewBox="0 0 200 200"><use xlink:href="#doc-link"/></svg>';
       }
 
@@ -206,15 +206,7 @@ function script(documents, config) {
         return iconMap[mimePrefix] || '<svg viewBox="0 0 24 24"><use xlink:href="#doc-unknown"/></svg>';
       }
 
-      const legacyIconMap = {
-        'audio': '<svg viewBox="0 0 200 200"><use xlink:href="#doc-audio"/></svg>',
-        'image': '<svg viewBox="0 0 200 200"><use xlink:href="#doc-image"/></svg>',
-        'link': '<svg viewBox="0 0 200 200"><use xlink:href="#doc-link"/></svg>',
-        'text': '<svg viewBox="0 0 24 24"><use xlink:href="#doc-text"/></svg>',
-        'video': '<svg viewBox="0 0 200 200"><use xlink:href="#doc-video"/></svg>',
-        'file': '<svg viewBox="0 0 24 24"><use xlink:href="#doc-text"/></svg>'
-      };
-      return legacyIconMap[format] || '<svg viewBox="0 0 24 24"><use xlink:href="#doc-unknown"/></svg>';
+      return '<svg viewBox="0 0 24 24"><use xlink:href="#doc-unknown"/></svg>';
     }
 
 
