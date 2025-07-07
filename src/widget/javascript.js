@@ -34,6 +34,9 @@ function script(documents, config) {
       // Track upload requests by requestId
       this.pendingRequests = new Set();
       this.uploadResults = {};
+      
+      // Initialize internal documents array with UUID management
+      this.documents = this.ensureDocumentIds(documents || []);
 
       this.renderSkeleton();
       this.bindStaticEvents();
@@ -43,9 +46,39 @@ function script(documents, config) {
       if (this.cfg.canReorder) this.initSortable();
       window.addEventListener("message", this.onHostMessage.bind(this));
 
-      if (documents && documents.length > 0) {
-        this.renderInitialDocuments(documents);
+      if (this.documents && this.documents.length > 0) {
+        this.renderInitialDocuments();
       }
+    }
+
+    ensureDocumentIds(docs) {
+      return docs.map(doc => ({
+        ...doc,
+        id: doc.id || (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "doc_" + Date.now() + "_" + Math.random().toString(16).slice(2))
+      }));
+    }
+
+    findDocumentById(id) {
+      return this.documents.find(doc => doc.id === id);
+    }
+
+    updateDocumentInArray(id, updates) {
+      const index = this.documents.findIndex(doc => doc.id === id);
+      if (index !== -1) {
+        this.documents[index] = { ...this.documents[index], ...updates };
+        return this.documents[index];
+      }
+      return null;
+    }
+
+    removeDocumentFromArray(id) {
+      const index = this.documents.findIndex(doc => doc.id === id);
+      if (index !== -1) {
+        const removedDoc = this.documents[index];
+        this.documents.splice(index, 1);
+        return removedDoc;
+      }
+      return null;
     }
 
     renderSkeleton() {
@@ -124,48 +157,21 @@ function script(documents, config) {
       this.fileInput = input;
     }
 
-    renderInitialDocuments(documents) {
+    renderInitialDocuments() {
       // Clear existing documents (should be empty on init, but for safety)
       while (this.fileItemsContainer.firstChild) {
         this.fileItemsContainer.removeChild(this.fileItemsContainer.firstChild);
       }
 
-      documents.forEach((doc) => {
-        const el = this.createItemElement({
-          title: doc.fileName || doc.url,
-          format: doc.format,
-          fileName: doc.fileName,
-          url: doc.url,
-          description: doc.description,
-          ...(doc.canEdit !== undefined && { canEdit: doc.canEdit }),
-          ...(doc.canDelete !== undefined && { canDelete: doc.canDelete }),
-          ...(doc.canClick !== undefined && { canClick: doc.canClick }),
-          ...(doc.showDocumentIcon !== undefined && { showDocumentIcon: doc.showDocumentIcon }),
-          ...(doc.showDescription !== undefined && { showDescription: doc.showDescription })
-        });
+      this.documents.forEach((doc) => {
+        const el = this.createItemElement(doc);
         this.fileItemsContainer.appendChild(el);
       });
       this.recalcDocuments();
     }
 
     getFilesSnapshot() {
-      return Array.from(this.fileItemsContainer.querySelectorAll(".file-item")).map((item, i) => {
-        const doc = {
-          index: i,
-          format: item.dataset.format,
-          description: item.dataset.description || "",
-        };
-
-        if (item.dataset.fileName && item.dataset.fileName.trim() !== "") {
-          doc.fileName = item.dataset.fileName;
-        }
-
-        if (item.dataset.url && item.dataset.url.trim() !== "") {
-          doc.url = item.dataset.url;
-        }
-
-        return doc;
-      });
+      return [...this.documents];
     }
 
     getFileIcon(format) {
@@ -219,8 +225,13 @@ function script(documents, config) {
     recalcDocuments() {
       const items = this.fileItemsContainer.querySelectorAll(".file-item");
       items.forEach((item, i) => {
-        const desc = item.dataset.description;
-        const name = item.dataset.fileName || item.dataset.url;
+        const docId = item.dataset.id;
+        const doc = this.documents.find(d => d.id === docId);
+        
+        if (!doc) return; // Skip if document not found
+        
+        const desc = doc.description;
+        const name = doc.fileName || doc.url;
         const mask = this.cfg.localization.defaultDescriptionMask.replace("{{n}}", i + 1);
         const content = item.querySelector(".file-content");
         // Clear previous
@@ -233,9 +244,9 @@ function script(documents, config) {
         nameSpan.textContent = name;
         content.appendChild(nameSpan);
         this.setup_native_overflow_tooltip(nameSpan);
-        // Description - need to get per-document setting from dataset
-        const showDesc = item.dataset.showDescription !== undefined ?
-          item.dataset.showDescription === 'true' : this.cfg.showDescription;
+        // Description - need to get per-document setting from document object
+        const showDesc = doc.showDescription !== undefined ?
+          doc.showDescription : this.cfg.showDescription;
         if (showDesc) {
           const descSpan = document.createElement("span");
           descSpan.className = "description" + (desc ? "" : " mock-description");
@@ -254,11 +265,7 @@ function script(documents, config) {
       } = doc;
       const div = document.createElement("div");
       div.className = "file-item";
-      div.dataset.fileName = fileName || "";
-      div.dataset.description = description;
-      div.dataset.url = url || "";
-      div.dataset.format = format;
-      div.dataset.showDescription = doc.showDescription !== undefined ? doc.showDescription.toString() : this.cfg.showDescription.toString();
+      div.dataset.id = doc.id;
 
       // Icon
       const showIcon = doc.showDocumentIcon !== undefined ? doc.showDocumentIcon : this.cfg.showDocumentIcon;
@@ -346,11 +353,11 @@ function script(documents, config) {
       deleteBtn?.addEventListener("click", (e) => {
         e.stopPropagation();
         const idx = [...this.fileItemsContainer.children].indexOf(item);
-        const deletedDoc = {
-          fileName: item.dataset.fileName,
-          url: item.dataset.url,
-          description: item.dataset.description
-        };
+        const docId = item.dataset.id;
+        const deletedDoc = this.documents.find(doc => doc.id === docId);
+        
+        this.documents = this.documents.filter(doc => doc.id !== docId);
+        
         item.remove();
         this.recalcDocuments();
         window.parent.postMessage({
@@ -459,6 +466,12 @@ function script(documents, config) {
           const orderChanged = !initialOrder.every((node, index) => node === currentOrder[index]);
 
           if (orderChanged) {
+            const newOrderIds = currentOrder.map(element => element.dataset.id);
+            
+            this.documents = newOrderIds.map(id => 
+              this.documents.find(doc => doc.id === id)
+            ).filter(Boolean);
+
             window.parent.postMessage({
               type: "documentsChanged",
               appName: "scPostMessage",
@@ -531,8 +544,8 @@ function script(documents, config) {
             requestId,
             fileData
           } = payload;
-          // create element for this file
-          const element = this.createItemElement({
+          
+          const newDoc = this.ensureDocumentIds([{
             format: fileData.data.type,        // MIME type from simulator
             fileName: fileData.data.title,     // Display name from simulator
             url: `https://sim.simulator.company/api/1.0/download/${fileData.data.fileName}?preview=true`,  // Full URL using download API template
@@ -542,7 +555,11 @@ function script(documents, config) {
             ...(fileData.data.canClick !== undefined && { canClick: fileData.data.canClick }),
             ...(fileData.data.showDocumentIcon !== undefined && { showDocumentIcon: fileData.data.showDocumentIcon }),
             ...(fileData.data.showDescription !== undefined && { showDescription: fileData.data.showDescription })
-          });
+          }])[0];
+          
+          this.documents.push(newDoc);
+          
+          const element = this.createItemElement(newDoc);
           this.fileItemsContainer.appendChild(element);
           this.recalcDocuments();
           // store result
@@ -586,22 +603,14 @@ function script(documents, config) {
           const {
             documents
           } = payload;
-          // clear and render new list
+          
+          this.documents = this.ensureDocumentIds(documents);
+          
           while (this.fileItemsContainer.firstChild) {
             this.fileItemsContainer.removeChild(this.fileItemsContainer.firstChild);
           }
-          documents.forEach((doc) => {
-            const el = this.createItemElement({
-              format: doc.format,
-              fileName: doc.fileName,
-              url: doc.url,
-              description: doc.description,
-              ...(doc.canEdit !== undefined && { canEdit: doc.canEdit }),
-              ...(doc.canDelete !== undefined && { canDelete: doc.canDelete }),
-              ...(doc.canClick !== undefined && { canClick: doc.canClick }),
-              ...(doc.showDocumentIcon !== undefined && { showDocumentIcon: doc.showDocumentIcon }),
-              ...(doc.showDescription !== undefined && { showDescription: doc.showDescription })
-            });
+          this.documents.forEach((doc) => {
+            const el = this.createItemElement(doc);
             this.fileItemsContainer.appendChild(el);
           });
           this.recalcDocuments();

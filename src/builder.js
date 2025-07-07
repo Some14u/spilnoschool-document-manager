@@ -44,12 +44,12 @@ function buildWidget() {
           {
             url: 'https://example.com/sample.pdf',
             fileName: 'sample.pdf',
-            type: 'application/pdf'
+            format: 'application/pdf'
           },
           {
             url: 'https://example.com/document.docx',
             fileName: 'document.docx',
-            type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            format: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
           }
         ],
         config: {

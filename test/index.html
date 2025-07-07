@@ -41,12 +41,12 @@
         </div>
     </div>
 
-    <!-- Модальный диалог для добавления веб-документа -->
-    <div id="webDocumentModal" class="modal" style="display: none;">
+    <!-- Модальный диалог для добавления/редактирования документа -->
+    <div id="documentModal" class="modal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
                 <h3>Добавить веб-документ</h3>
-                <span class="close" onclick="hideWebDocumentDialog()">&times;</span>
+                <span class="close" onclick="hideDocumentDialog()">&times;</span>
             </div>
             <div class="modal-body">
                 <form id="webDocumentForm">
@@ -58,8 +58,20 @@
                 </form>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-danger" onclick="hideWebDocumentDialog()">Отмена</button>
-                <button type="button" class="btn btn-success" onclick="submitWebDocument()">Добавить</button>
+                <button type="button" class="btn btn-danger" onclick="hideDocumentDialog()">Отмена</button>
+                <button type="button" class="btn btn-success" onclick="submitDocument()">Добавить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JSON Popup для отображения дескрипторов документов -->
+    <div id="jsonPopup" class="json-popup" style="display: none;">
+        <div class="json-popup-content">
+            <div class="json-popup-header">
+                <h4>Дескриптор документа</h4>
+            </div>
+            <div class="json-popup-body">
+                <pre id="jsonContent"></pre>
             </div>
         </div>
     </div>
