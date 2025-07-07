@@ -40,7 +40,7 @@ function buildWidget() {
     host: 'localhost:3000', // Default host, can be overridden
     __request: {
       query_params: {
-        documents: encodeURIComponent(JSON.stringify([
+        documents: [
           {
             url: 'https://example.com/sample.pdf',
             fileName: 'sample.pdf',
@@ -51,12 +51,12 @@ function buildWidget() {
             fileName: 'document.docx',
             type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
           }
-        ])),
-        config: encodeURIComponent(JSON.stringify({
+        ],
+        config: {
           allowUpload: true,
           maxFileSize: 10485760, // 10MB
           allowedTypes: ['pdf', 'doc', 'docx', 'txt', 'jpg', 'png']
-        }))
+        }
       }
     }
   };
