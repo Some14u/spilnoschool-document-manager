@@ -72,8 +72,10 @@ function buildWidget() {
 
   try {
     console.log('📝 Processing CSS component...');
-    delete require.cache[path.join(componentsDir, 'css.js')];
-    require(path.join(componentsDir, 'css.js'));
+    const cssModule = path.join(componentsDir, 'css.js');
+    const cssKey = require.resolve(cssModule);
+    delete require.cache[cssKey];
+    require(cssModule);
   } catch (error) {
     generateErrorPage('CSS', error, distDir);
     buildSuccess = false;
@@ -82,8 +84,10 @@ function buildWidget() {
   if (buildSuccess) {
     try {
       console.log('⚡ Processing JavaScript component...');
-      delete require.cache[path.join(componentsDir, 'javascript.js')];
-      require(path.join(componentsDir, 'javascript.js'));
+      const jsModule = path.join(componentsDir, 'javascript.js');
+      const jsKey = require.resolve(jsModule);
+      delete require.cache[jsKey];
+      require(jsModule);
     } catch (error) {
       generateErrorPage('JavaScript', error, distDir);
       buildSuccess = false;
@@ -93,8 +97,10 @@ function buildWidget() {
   if (buildSuccess) {
     try {
       console.log('🔧 Processing iframe-resizer-javascript component...');
-      delete require.cache[path.join(componentsDir, 'iframe-resizer-javascript.js')];
-      require(path.join(componentsDir, 'iframe-resizer-javascript.js'));
+      const iframeModule = path.join(componentsDir, 'iframe-resizer-javascript.js');
+      const iframeKey = require.resolve(iframeModule);
+      delete require.cache[iframeKey];
+      require(iframeModule);
     } catch (error) {
       generateErrorPage('iframe-resizer-javascript', error, distDir);
       buildSuccess = false;
@@ -104,8 +110,10 @@ function buildWidget() {
   if (buildSuccess) {
     try {
       console.log('🏗️  Processing HTML component...');
-      delete require.cache[path.join(componentsDir, 'html.js')];
-      require(path.join(componentsDir, 'html.js'));
+      const htmlModule = path.join(componentsDir, 'html.js');
+      const htmlKey = require.resolve(htmlModule);
+      delete require.cache[htmlKey];
+      require(htmlModule);
     } catch (error) {
       generateErrorPage('HTML', error, distDir);
       buildSuccess = false;
