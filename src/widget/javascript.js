@@ -17,7 +17,7 @@ function script(documents, config) {
         showMenuPerDocument: true,
         canClick: true,
         fileLimit: Infinity,
-        mimeTypes: [],
+        allowedFormats: [],
         fileSizeLimit: Infinity,
         showAddAudioRecordButton: true,
         showAddWebResourceButton: true,
@@ -153,6 +153,9 @@ function script(documents, config) {
       input.id = "fileInput";
       input.multiple = true;
       input.style.display = "none";
+      if (this.cfg.allowedFormats && this.cfg.allowedFormats.length > 0) {
+        input.accept = this.cfg.allowedFormats.join(',');
+      }
       this.rootEl.appendChild(input);
       this.fileInput = input;
     }
@@ -510,12 +513,26 @@ function script(documents, config) {
         alert(msg);
         return;
       }
+
+      let validFiles = files;
+      if (this.cfg.allowedFormats && this.cfg.allowedFormats.length > 0) {
+        validFiles = files.filter(file => this.cfg.allowedFormats.includes(file.type));
+        if (validFiles.length === 0) {
+          alert("Выбранные файлы не соответствуют разрешенным форматам.");
+          return;
+        }
+        if (validFiles.length < files.length) {
+          const rejectedCount = files.length - validFiles.length;
+          alert(`${rejectedCount} файл(ов) отклонено из-за неподдерживаемого формата.`);
+        }
+      }
+
       this.applyOverlay();
       // Reset tracking
       this.pendingRequests.clear();
       this.uploadResults = {};
 
-      files.forEach((file) => {
+      validFiles.forEach((file) => {
         // generate unique requestId
         const requestId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "req_" + Date.now() + "_" + Math.random().toString(16).slice(2);
         this.pendingRequests.add(requestId);
